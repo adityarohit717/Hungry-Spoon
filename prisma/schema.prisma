@@ -1,0 +1,326 @@
+// Prisma schema for Hungry Spoon Restaurant Management & Billing System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("STAFF") // "ADMIN" | "STAFF"
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders       Order[]
+  kots         KOT[]
+  bills        CustomerBill[]
+  payments     Payment[]
+  stockMovements StockMovement[]
+  auditLogs    AuditLog[]
+}
+
+model MenuCategory {
+  id           String     @id @default(uuid())
+  name         String     @unique
+  displayOrder Int        @default(0)
+  description  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  items        MenuItem[]
+}
+
+model MenuItem {
+  id               String          @id @default(uuid())
+  name             String
+  categoryId       String
+  category         MenuCategory    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  description      String?
+  sellingPrice     Float
+  isAvailable      Boolean         @default(true)
+  imageUrl         String?
+  preparationNotes String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  recipe           Recipe?
+  orderItems       OrderItem[]
+  billItems        BillItem[]
+
+  @@index([categoryId])
+}
+
+model InventoryItem {
+  id                String             @id @default(uuid())
+  name              String
+  category          String             // e.g. "Dairy", "Vegetables", "Spices", "Grains", "Packaging"
+  currentQuantity   Float              @default(0)
+  unit              String             // "kg", "g", "litre", "ml", "pcs"
+  minThreshold      Float              @default(5)
+  reorderQuantity   Float              @default(10)
+  unitCost          Float              @default(0)
+  storageLocation   String?
+  supplierId        String?
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lastPurchaseDate  DateTime?
+  expiryDate        DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  recipeIngredients RecipeIngredient[]
+  stockMovements    StockMovement[]
+  stockReservations StockReservation[]
+
+  @@index([supplierId])
+}
+
+model Supplier {
+  id            String          @id @default(uuid())
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  inventoryItems InventoryItem[]
+}
+
+model Recipe {
+  id          String             @id @default(uuid())
+  menuItemId  String             @unique
+  menuItem    MenuItem           @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  notes       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  ingredients RecipeIngredient[]
+}
+
+model RecipeIngredient {
+  id               String        @id @default(uuid())
+  recipeId         String
+  recipe           Recipe        @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  inventoryItemId  String
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  quantityRequired Float
+  unit             String        // "g", "ml", "pcs", "kg", "litre"
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([recipeId])
+  @@index([inventoryItemId])
+}
+
+model Order {
+  id           String        @id @default(uuid())
+  orderNumber  String        @unique // e.g. ORD-20261026-0001
+  orderType    String        @default("DINE_IN") // "DINE_IN" | "TAKEAWAY" | "DELIVERY"
+  tableNumber  String?
+  status       String        @default("DRAFT") // "DRAFT" | "SENT_TO_KITCHEN" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED"
+  orderNotes   String?
+  subtotal     Float         @default(0)
+  discount     Float         @default(0)
+  tax          Float         @default(0)
+  grandTotal   Float         @default(0)
+  createdById  String?
+  createdBy    User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  items        OrderItem[]
+  kots         KOT[]
+  bill         CustomerBill?
+  reservations StockReservation[]
+
+  @@index([status])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId  String
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  itemName    String
+  unitPrice   Float
+  quantity    Int
+  notes       String?
+  status      String   @default("PENDING") // "PENDING" | "COOKING" | "READY" | "SERVED" | "CANCELLED"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+model KOT {
+  id          String    @id @default(uuid())
+  kotNumber   String    @unique // e.g. KOT-0001
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  version     Int       @default(1)
+  status      String    @default("SENT_TO_KITCHEN") // "SENT_TO_KITCHEN" | "PREPARING" | "READY" | "SERVED" | "CANCELLED"
+  orderType   String    @default("DINE_IN")
+  tableNumber String?
+  notes       String?
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items       KOTItem[]
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model KOTItem {
+  id           String   @id @default(uuid())
+  kotId        String
+  kot          KOT      @relation(fields: [kotId], references: [id], onDelete: Cascade)
+  menuItemId   String
+  itemName     String
+  quantity     Int
+  instructions String?
+  isAmendment  Boolean  @default(false)
+  isCancelled  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([kotId])
+}
+
+model CustomerBill {
+  id             String     @id @default(uuid())
+  billNumber     String     @unique // e.g. BILL-20261026-0001
+  orderId        String     @unique
+  order          Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  billDate       DateTime   @default(now())
+  subtotal       Float
+  discount       Float      @default(0)
+  discountReason String?
+  taxRate        Float      @default(5.0)
+  taxAmount      Float      @default(0)
+  serviceCharge  Float      @default(0)
+  grandTotal     Float
+  paymentStatus  String     @default("UNPAID") // "UNPAID" | "PARTIALLY_PAID" | "PAID" | "REFUNDED"
+  finalizedById  String?
+  finalizedBy    User?      @relation(fields: [finalizedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  items          BillItem[]
+  payments       Payment[]
+
+  @@index([billNumber])
+  @@index([paymentStatus])
+}
+
+model BillItem {
+  id         String       @id @default(uuid())
+  billId     String
+  bill       CustomerBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem     @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  itemName   String
+  quantity   Int
+  unitPrice  Float
+  lineTotal  Float
+  createdAt  DateTime     @default(now())
+
+  @@index([billId])
+}
+
+model Payment {
+  id              String       @id @default(uuid())
+  billId          String
+  bill            CustomerBill @relation(fields: [billId], references: [id], onDelete: Restrict)
+  amount          Float
+  paymentMethod   String       // "CASH" | "UPI" | "CARD" | "OTHER"
+  referenceNumber String?
+  notes           String?
+  receivedById    String?
+  receivedBy      User?        @relation(fields: [receivedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now())
+
+  @@index([billId])
+}
+
+model StockMovement {
+  id              String        @id @default(uuid())
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  type            String        // "PURCHASE" | "USAGE_ORDER" | "MANUAL_ADJUSTMENT" | "WASTAGE" | "DAMAGE" | "RESERVATION_RELEASE"
+  quantityChange  Float
+  previousQuantity Float
+  newQuantity     Float
+  reason          String?
+  referenceId     String?       // orderId, billId, or purchaseId
+  performedById   String?
+  performedBy     User?         @relation(fields: [performedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+
+  @@index([inventoryItemId])
+  @@index([type])
+}
+
+model StockReservation {
+  id               String        @id @default(uuid())
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryItemId  String
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  quantityReserved Float
+  unit             String
+  status           String        @default("RESERVED") // "RESERVED" | "CONSUMED" | "RELEASED"
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([inventoryItemId])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  eventType     String   // e.g. "AUTH_LOGIN", "ORDER_CANCELLED", "BILL_FINALIZED", "BILL_DELETED", "KOT_DELETED", "INVENTORY_ADJUSTED", "MENU_UPDATED"
+  action        String
+  entityType    String   // "Order", "CustomerBill", "KOT", "InventoryItem", "User", "MenuItem"
+  entityId      String
+  performedById String?
+  performedBy   User?    @relation(fields: [performedById], references: [id], onDelete: SetNull)
+  reason        String?
+  details       String?  // JSON string
+  createdAt     DateTime @default(now())
+
+  @@index([eventType])
+  @@index([entityType])
+}
+
+model RestaurantSettings {
+  id                    String   @id @default(uuid())
+  restaurantName        String   @default("Hungry Spoon")
+  tagline               String   @default("Delicious Moments, Crafted with Care")
+  address               String   @default("42 Gourmet Avenue, Food District, Bengaluru, Karnataka 560001")
+  phone                 String   @default("+91 98765 43210")
+  email                 String   @default("contact@hungryspoon.com")
+  gstNumber             String   @default("29ABCDE1234F1Z5")
+  fssaiNumber           String   @default("11223344556677")
+  defaultTaxRate        Float    @default(5.0)
+  defaultServiceCharge  Float    @default(0.0)
+  currencySymbol        String   @default("₹")
+  receiptHeaderMessage  String   @default("Welcome to Hungry Spoon!")
+  receiptFooterMessage  String   @default("Thank you for dining with us! Visit again.")
+  allowNegativeStock    Boolean  @default(false)
+  updatedAt             DateTime @updatedAt
+}
